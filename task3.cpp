@@ -1,4 +1,6 @@
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -10,7 +12,7 @@
 #include <unistd.h>
 
 #define MAX_HOSTS 256
-#define MAX_PORTS 1024
+#define MAX_PORTS 10 // Reduced for testing
 
 typedef struct {
   char hostname[NI_MAXHOST];
@@ -43,6 +45,8 @@ void get_local_ip(char *buffer) {
 void scan_host(char *ip) {
   struct sockaddr_in addr;
   int sockfd;
+  struct timeval timeout;
+  fd_set fdset;
 
   // Get hostname
   struct hostent *host = gethostbyaddr(ip, strlen(ip), AF_INET);
@@ -54,19 +58,42 @@ void scan_host(char *ip) {
   }
 
   // Scan ports
-  for (int port = 1; port <= 1024; port++) {
+  for (int port = 1; port <= MAX_PORTS; port++) {
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
       continue;
+
+    // Set socket to non-blocking
+    fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, ip, &addr.sin_addr);
 
-    if (connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) >= 0) {
-      printf("Host: %s (IP: %s) - Port %d is open\n",
-             host ? host->h_name : "Unknown", ip, port);
+    int result = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
+    if (result < 0 && errno != EINPROGRESS) {
+      close(sockfd);
+      continue;
     }
+
+    FD_ZERO(&fdset);
+    FD_SET(sockfd, &fdset);
+    timeout.tv_sec = 1; // 1 second timeout
+    timeout.tv_usec = 0;
+
+    if (select(sockfd + 1, NULL, &fdset, NULL, &timeout) == 1) {
+      int so_error;
+      socklen_t len = sizeof so_error;
+
+      getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len);
+
+      if (so_error == 0) {
+        printf("Host: %s (IP: %s) - Port %d is open\n",
+               host ? host->h_name : "Unknown", ip, port);
+      }
+    }
+
     close(sockfd);
   }
 }
