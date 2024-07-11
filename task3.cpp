@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 #define MAX_HOSTS 256
-#define MAX_PORTS 10 // Reduced for testing
+#define MAX_PORTS 100 // Reduced for testing
 
 typedef struct {
   char hostname[NI_MAXHOST];
